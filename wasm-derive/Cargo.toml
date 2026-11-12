@@ -1,0 +1,30 @@
+[package]
+name = "midnight-derive-wasm"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-bindgen = "=0.2.100"
+blst = { version = "=0.3.17", features = ["portable", "no-threads"] }
+bip39 = { version = "2.0", features = ["all-languages"] }
+bip32 = "0.5"
+bech32 = "0.9"
+ed25519-bip32 = "0.4"
+pbkdf2 = "0.12"
+sha2 = "0.10"
+blake2 = "0.10"
+getrandom = { version = "0.2", features = ["js"] }
+getrandom03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
+getrandom04 = { package = "getrandom", version = "0.4", features = ["wasm_js"] }
+midnight-zswap          = { git = "https://github.com/midnightntwrk/midnight-ledger.git", rev = "9f9842e" }
+midnight-base-crypto    = { git = "https://github.com/midnightntwrk/midnight-ledger.git", rev = "9f9842e" }
+midnight-coin-structure = { git = "https://github.com/midnightntwrk/midnight-ledger.git", rev = "9f9842e" }
+midnight-ledger = { git = "https://github.com/midnightntwrk/midnight-ledger.git", rev = "9f9842e" }
+midnight-serialize = { git = "https://github.com/midnightntwrk/midnight-ledger.git", rev = "9f9842e", package = "midnight-serialize" }
+
+[profile.release]
+opt-level = "s"
+lto = true
