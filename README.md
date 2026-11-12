@@ -91,5 +91,7 @@ wasm-derive/build.sh                            full rebuild
 
 ## Credits and license
 
-Based on [iancoleman/bip39](https://github.com/iancoleman/bip39), MIT License. See `vendor/LICENSE-bip39`.
+This project is MIT licensed; see `LICENSE`.
+
+Based on [iancoleman/bip39](https://github.com/iancoleman/bip39), MIT License (Copyright (c) 2014-2016 Ian Coleman); see `vendor/LICENSE-bip39`.
 Midnight key derivation uses [midnightntwrk/midnight-ledger](https://github.com/midnightntwrk/midnight-ledger).
