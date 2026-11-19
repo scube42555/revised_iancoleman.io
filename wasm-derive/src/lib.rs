@@ -1,8 +1,10 @@
 // WASM port of midnight-offline-derive/src/main.rs (same derivation logic, same crate revs),
-// extended with per-row derivation for the BIP39 page (any account / role / index).
+// extended with per-row derivation for the BIP39 page (any account / role / index) and Cardano + Chia keys.
 use bech32::{self, ToBase32, Variant};
 use bip32::{DerivationPath, XPrv};
 use bip39::Mnemonic;
+use chia_bls::{DerivableKey, PublicKey as ChiaPk, SecretKey as ChiaSk};
+use chia_puzzle_types::{standard::StandardArgs, DeriveSynthetic};
 use blake2::{digest::{Update, VariableOutput}, Blake2bVar};
 use ed25519_bip32::{DerivationScheme as Scheme, XPrv as EdXPrv};
 use midnight_base_crypto::repr::BinaryHashRepr;
@@ -228,6 +230,65 @@ pub fn cardano_row(root_hex: &str, network: &str, account: u32, role: u32, index
         ("publicKey", b32(&format!("{prefix}_vk"), &vk, Variant::Bech32)),
         ("privateKey", b32(&format!("{prefix}_xsk"), key.as_ref(), Variant::Bech32)),
     ]))
+}
+
+// ---------------------------------------------------------------- Chia
+
+// Chia key paths (chia-blockchain derive_keys.py): m/12381/8444/<role>/<index>
+const CHIA_ROLES: [u32; 5] = [0, 1, 2, 3, 5]; // farmer, pool, wallet, local (plot), pool singleton (plot NFT owner)
+const CHIA_WALLET: u32 = 2;
+
+/// BLS (EIP-2333) master key from the BIP39 seed, as chia-blockchain does (AugSchemeMPL.key_gen(seed)).
+fn chia_master(seed_hex: &str) -> Result<ChiaSk, String> {
+    let seed = decode_hex(seed_hex)?;
+    if seed.len() < 32 {
+        return Err("Chia needs a seed of at least 32 bytes".into());
+    }
+    Ok(ChiaSk::from_seed(&seed))
+}
+
+/// Chia derives the wallet role either fully unhardened ("observer", the default wallet)
+/// or fully hardened; every other role is always hardened.
+fn chia_key(master: &ChiaSk, role: u32, index: u32, hardened: bool) -> ChiaSk {
+    let path = [12381, 8444, role, index];
+    if hardened || role != CHIA_WALLET {
+        path.iter().fold(master.clone(), |k, i| k.derive_hardened(*i))
+    } else {
+        path.iter().fold(master.clone(), |k, i| k.derive_unhardened(*i))
+    }
+}
+
+/// xch/txch address of the standard transaction puzzle for a wallet public key.
+fn chia_address(pk: &ChiaPk, network: &str) -> String {
+    let puzzle_hash: [u8; 32] = StandardArgs::curry_tree_hash(pk.derive_synthetic()).into();
+    b32(if network == "mainnet" { "xch" } else { "txch" }, &puzzle_hash, Variant::Bech32m)
+}
+
+/// Master-level values shown by `chia keys show`.
+#[wasm_bindgen]
+pub fn chia_keys(seed_hex: &str) -> Result<String, JsError> {
+    let master = chia_master(seed_hex).map_err(err)?;
+    let pk = master.public_key();
+    Ok(obj(&[
+        ("masterSk", hex(&master.to_bytes())),
+        ("masterPk", hex(&pk.to_bytes())),
+        ("fingerprint", pk.get_fingerprint().to_string()),
+        ("farmerPk", hex(&chia_key(&master, 0, 0, true).public_key().to_bytes())),
+        ("poolPk", hex(&chia_key(&master, 1, 0, true).public_key().to_bytes())),
+    ]))
+}
+
+/// One Derived Addresses row for Chia: m/12381/8444/role/index. Only the wallet role (2) has an address.
+#[wasm_bindgen]
+pub fn chia_row(seed_hex: &str, network: &str, role: u32, index: u32, hardened: bool) -> Result<String, JsError> {
+    if !CHIA_ROLES.contains(&role) {
+        return Err(err(format!("Unknown Chia role {role}")));
+    }
+    let master = chia_master(seed_hex).map_err(err)?;
+    let sk = chia_key(&master, role, index, hardened);
+    let pk = sk.public_key();
+    let address = if role == CHIA_WALLET { chia_address(&pk, network) } else { "n/a (key only)".to_string() };
+    Ok(obj(&[("address", address), ("publicKey", hex(&pk.to_bytes())), ("privateKey", hex(&sk.to_bytes()))]))
 }
 
 // ---------------------------------------------------------------- full summary (regression check vs native CLI)

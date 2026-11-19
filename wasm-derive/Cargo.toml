@@ -25,6 +25,8 @@ midnight-base-crypto    = { git = "https://github.com/midnightntwrk/midnight-led
 midnight-coin-structure = { git = "https://github.com/midnightntwrk/midnight-ledger.git", rev = "9f9842e" }
 midnight-ledger = { git = "https://github.com/midnightntwrk/midnight-ledger.git", rev = "9f9842e" }
 midnight-serialize = { git = "https://github.com/midnightntwrk/midnight-ledger.git", rev = "9f9842e", package = "midnight-serialize" }
+chia-bls = { version = "=0.55.0", default-features = false }
+chia-puzzle-types = { version = "=0.55.0", default-features = false }
 
 [profile.release]
 opt-level = "s"

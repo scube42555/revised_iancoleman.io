@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Patch the iancoleman BIP39 page: add "NIGHT - Midnight" and "ADA - Cardano" coins whose
+"""Patch the iancoleman BIP39 page: add "NIGHT - Midnight", "ADA - Cardano" and "XCH - Chia" coins whose
 Derivation Path / Derived Addresses sections are computed by the embedded WASM module.
 
 usage: build_html.py <source.html> <glue.js> <module.wasm> <out.html>
@@ -55,6 +55,13 @@ html = replace_once(html,
                 network = libs.bitcoin.networks.bitcoin;
                 setHdCoin(1815);
             },
+        },
+        {
+            name: "XCH - Chia",
+            onSelect: function() {
+                network = libs.bitcoin.networks.bitcoin;
+                setHdCoin(8444);
+            },
         }
     ]''')
 
@@ -94,7 +101,7 @@ html = replace_once(html,
     '''        var network = networks[networkIndex];
         network.onSelect();
         if (window.altModeChanged) { window.altModeChanged(); }''')
-# each Derived Addresses row: let the Midnight/Cardano code produce it
+# each Derived Addresses row: let the Midnight/Cardano/Chia code produce it
 html = replace_once(html,
     '''                if (!self.shouldGenerate) {
                     return;
@@ -115,7 +122,7 @@ html = replace_once(html,
                     }
                 }
                 // derive HDkey for this row of the table''')
-# after keys are displayed: Cardano replaces the secp256k1 key fields with its own
+# after keys are displayed: Cardano and Chia replace the secp256k1 key fields with their own
 html = replace_once(html,
     '''        if (isELA()) {
             displayBip32InfoForELA();
@@ -130,9 +137,11 @@ html = replace_once(html,
 # ---- 5. controller
 CONTROLLER = r'''
 (function() {
-    var MIDNIGHT = "NIGHT - Midnight", CARDANO = "ADA - Cardano";
+    var COINS = { "NIGHT - Midnight": "midnight", "ADA - Cardano": "cardano", "XCH - Chia": "chia" };
+    // purpose: value of the Purpose field; singleTab: hide the BIP32 tab too; defaultRole: initial Role selection
     var CFG = {
         midnight: {
+            purpose: 44, singleTab: false, defaultRole: 0,
             networks: ["mainnet", "preprod", "preview", "testnet", "undeployed"],
             roles: [[0, "0 - Unshielded (Night external)"], [1, "1 - Unshielded change (Night internal)"],
                     [2, "2 - Dust"], [3, "3 - Shielded (Zswap)"], [4, "4 - Metadata (key only, no address)"]],
@@ -145,6 +154,7 @@ CONTROLLER = r'''
                   'On the BIP32 tab the role is taken from the 4th path level when it is 0-4, otherwise from the Role selector.'
         },
         cardano: {
+            purpose: 1852, singleTab: true, defaultRole: 0,
             networks: ["mainnet", "preprod", "preview"],
             roles: [[0, "0 - Payment (external)"], [1, "1 - Change (internal)"], [2, "2 - Stake"], [3, "3 - DRep"]],
             tab: "CIP-1852",
@@ -154,10 +164,24 @@ CONTROLLER = r'''
                   'Payment and Change rows show base addresses paired with the stake key m/1852\'/1815\'/account\'/2/0. ' +
                   'Stake rows show reward addresses; DRep rows show the CIP-129 DRep ID. ' +
                   'preprod and preview share network id 0, so their addresses are identical.'
+        },
+        chia: {
+            purpose: 12381, singleTab: true, defaultRole: 2,
+            networks: ["mainnet", "testnet11"],
+            roles: [[2, "2 - Wallet"], [0, "0 - Farmer (key only)"], [1, "1 - Pool (key only)"],
+                    [3, "3 - Local / plot (key only)"], [5, "5 - Pool singleton / plot NFT owner (key only)"]],
+            tab: "EIP-2333 (Chia)",
+            spec: 'Chia HD wallet: BLS12-381 keys. Master key = BLS KeyGen (chia_rs AugSchemeMPL.key_gen) of the BIP39 seed; ' +
+                  'path m/12381/8444/role/index, as in chia-blockchain. Wallet addresses are bech32m of the standard ' +
+                  'transaction puzzle hash (synthetic key with the default hidden puzzle).',
+            help: 'Unchecked "Use hardened addresses" = observer (unhardened) wallet keys, which the Chia wallet uses by default; ' +
+                  'checked = hardened wallet keys (the wallet tracks both). Farmer, pool, local and singleton keys are always hardened. ' +
+                  'The fields above match "chia keys show". The official Chia wallet uses an empty BIP39 passphrase; ' +
+                  'any passphrase entered here changes every key.'
         }
     };
     var current = null, saved = null, ready = false;
-    var netChoice = { midnight: "mainnet", cardano: "mainnet" };
+    var netChoice = { midnight: "mainnet", cardano: "mainnet", chia: "mainnet" };
     var rootCache = { key: null, value: null, error: null };
 
     var bytes = Uint8Array.from(atob(MIDNIGHT_WASM_B64), function(c) { return c.charCodeAt(0); });
@@ -166,7 +190,7 @@ CONTROLLER = r'''
 
     function mode() {
         var t = $("#network-phrase option:selected").text();
-        return t === MIDNIGHT ? "midnight" : t === CARDANO ? "cardano" : null;
+        return COINS[t] || null;
     }
     function recompute() {
         if ($("#phrase").val().trim() || $("#seed").val().trim()) {
@@ -199,25 +223,26 @@ CONTROLLER = r'''
         saveOriginals();
         var m = mode();
         current = m;
+        var cfg = m ? CFG[m] : null;
         var tabsToHide = m ? ["#bip49-tab", "#bip84-tab", "#bip141-tab"] : [];
-        if (m === "cardano") { tabsToHide.push("#bip32-tab"); }
+        if (m && cfg.singleTab) { tabsToHide.push("#bip32-tab"); }
         ["#bip32-tab", "#bip49-tab", "#bip84-tab", "#bip141-tab"].forEach(function(id) {
             $(id).toggleClass("hidden", tabsToHide.indexOf(id) >= 0);
         });
         $("#alt-network-group, #alt-role-group").toggleClass("hidden", !m);
         $("#change-bip44").closest(".form-group").toggleClass("hidden", !!m);
+        $("#account-bip44").closest(".form-group").toggleClass("hidden", m === "chia");  // Chia has no account level
         for (var k in EL) { EL[k]().html(saved[k]); }
-        $("#purpose-bip44").val(m === "cardano" ? 1852 : 44);
+        $("#purpose-bip44").val(m ? cfg.purpose : 44);
         if (!m) { $("#change-bip44").val(0); return; }
 
-        var cfg = CFG[m];
         var net = $("#alt-network").empty();
         cfg.networks.forEach(function(n) { net.append($("<option>").val(n).text(n)); });
         net.val(netChoice[m]);
         var role = $("#alt-role").empty();
         cfg.roles.forEach(function(r) { role.append($("<option>").val(r[0]).text(r[1])); });
-        role.val("0");
-        $("#change-bip44").val(0);
+        role.val(String(cfg.defaultRole));
+        $("#change-bip44").val(cfg.defaultRole);
         setText("tab", cfg.tab);
         setText("spec", cfg.spec);
         $("#alt-help").text(cfg.help);
@@ -230,7 +255,16 @@ CONTROLLER = r'''
             setText("extPubLabel", "Role Extended Public Key (hex)");
             setText("pathLabel", "CIP-1852 Derivation Path");
         }
-        if (!$("#bip44-tab").hasClass("active") && (m === "cardano" || !$("#bip32-tab").hasClass("active"))) {
+        if (m === "chia") {
+            setText("rootLabel", "Chia Master Private Key (hex)");
+            setText("acctHelp", "Master key details, as printed by \"chia keys show\".");
+            setText("xprvLabel", "Fingerprint");
+            setText("xpubLabel", "Master Public Key (m)");
+            setText("extPrivLabel", "Farmer Public Key (m/12381'/8444'/0'/0')");
+            setText("extPubLabel", "Pool Public Key (m/12381'/8444'/1'/0')");
+            setText("pathLabel", "EIP-2333 Derivation Path");
+        }
+        if (!$("#bip44-tab").hasClass("active") && (cfg.singleTab || !$("#bip32-tab").hasClass("active"))) {
             $("#bip44-tab a").tab("show");
         }
     };
@@ -258,8 +292,34 @@ CONTROLLER = r'''
     function account() { return parseInt($("#account-bip44").val(), 10) || 0; }
     function selectedRole() { return parseInt($("#alt-role").val(), 10) || 0; }
 
+    // Chia path prefix m/12381/8444/role: every level hardened or none (wallet observer keys)
+    function chiaHardened(hardened) { return !!hardened || selectedRole() !== 2; }
+    function chiaBase(hardened) {
+        var h = chiaHardened(hardened) ? "'" : "";
+        return "m/12381" + h + "/8444" + h + "/" + selectedRole() + h;
+    }
+    function hardenedChecked() { return $(".hardened-addresses").prop("checked"); }
+
+    function chiaAfterDisplay() {
+        var seedHex = $("#seed").val().trim();
+        $("#bip44-path").val(chiaBase(hardenedChecked()));
+        try {
+            var k = JSON.parse(wasm_bindgen.chia_keys(seedHex));
+            $("#root-key").val(k.masterSk);
+            $("#account-xprv-bip44").val(k.fingerprint);
+            $("#account-xpub-bip44").val(k.masterPk);
+            $("#extended-priv-key").val(k.farmerPk);
+            $("#extended-pub-key").val(k.poolPk);
+        } catch (e) {
+            var msg = errText(e);
+            $("#root-key, #account-xprv-bip44, #account-xpub-bip44, #extended-priv-key, #extended-pub-key").val(msg);
+        }
+    }
+
     window.altAfterDisplay = function() {
-        if (current !== "cardano" || !ready) { return; }
+        if (!ready) { return; }
+        if (current === "chia") { chiaAfterDisplay(); return; }
+        if (current !== "cardano") { return; }
         try {
             var k = JSON.parse(wasm_bindgen.cardano_keys(cardanoRoot(), account(), selectedRole()));
             $("#root-key").val(k.rootXsk);
@@ -277,6 +337,7 @@ CONTROLLER = r'''
         if (!current) { return null; }
         var bip44 = $("#bip44-tab").hasClass("active");
         var base = bip44 ? $("#bip44-path").val() : $("#bip32-path").val();
+        if (current === "chia") { base = chiaBase(hardened); hardened = chiaHardened(hardened); }
         var path = base.replace(/\/$/, "") + "/" + index + (hardened ? "'" : "");
         var row = { path: path, address: "", publicKey: "", privateKey: "" };
         if (!ready) { row.address = "WASM module still loading"; return row; }
@@ -288,6 +349,8 @@ CONTROLLER = r'''
                 var parts = path.split("/");
                 if (!bip44 && parts.length >= 5 && /^[0-4]$/.test(parts[4])) { role = parseInt(parts[4], 10); }
                 r = JSON.parse(wasm_bindgen.midnight_row($("#seed").val().trim(), net, path, role));
+            } else if (current === "chia") {
+                r = JSON.parse(wasm_bindgen.chia_row($("#seed").val().trim(), net, selectedRole(), index, hardened));
             } else {
                 r = JSON.parse(wasm_bindgen.cardano_row(cardanoRoot(), net, account(), selectedRole(), index, !!hardened));
             }
@@ -304,7 +367,7 @@ inject = ("<script>\nvar MIDNIGHT_WASM_B64 = \"%s\";\n</script>\n<script>\n%s\n<
           % (wasm_b64, glue, CONTROLLER))
 pos = html.rindex("</body>")
 html = html[:pos] + inject + html[pos:]
-html = replace_once(html, "<title>BIP39 - Mnemonic Code", "<title>BIP39 - Mnemonic Code (Cardano + Midnight)")
+html = replace_once(html, "<title>BIP39 - Mnemonic Code", "<title>BIP39 - Mnemonic Code (Cardano + Midnight + Chia)")
 
 open(out, "w", encoding="utf-8").write(html)
 print("wrote", out)
